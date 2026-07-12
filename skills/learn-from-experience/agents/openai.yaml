@@ -1,0 +1,5 @@
+interface:
+  display_name: "Learn from Experience"
+  short_description: "Turn repeated outcomes into auditable agent experience"
+  default_prompt: "Use $learn-from-experience to capture and apply lessons from this work."
+
