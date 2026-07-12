@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .engine import EvolutionPolicy, ExperienceEngine
-from .models import Decision, Evidence, ExperienceSeed, Nature, Observation
+from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation
 from .store import DecisionStore, SQLiteSeedStore
 
 
@@ -23,11 +23,15 @@ def parser() -> argparse.ArgumentParser:
     plant.add_argument("--applies", required=True)
     plant.add_argument("--source")
     plant.add_argument("--evidence")
+    plant.add_argument("--channel", choices=["direct", "reflective", "interactive"], default="reflective")
     plant.add_argument("--nature", choices=["speculative", "conditional", "principle"], default="speculative")
 
     reinforce = commands.add_parser("reinforce", help="Add independent evidence")
-    reinforce.add_argument("seed_id"); reinforce.add_argument("--polarity", choices=["support", "contradict"], required=True)
-    reinforce.add_argument("--source", required=True); reinforce.add_argument("--evidence", required=True)
+    reinforce.add_argument("seed_id")
+    reinforce.add_argument("--polarity", choices=["support", "contradict"], required=True)
+    reinforce.add_argument("--source", required=True)
+    reinforce.add_argument("--evidence", required=True)
+    reinforce.add_argument("--channel", choices=["direct", "reflective", "interactive"], default="reflective")
 
     activate = commands.add_parser("activate", help="Find experience relevant to current context")
     activate.add_argument("context"); activate.add_argument("--limit", type=int, default=5)
@@ -63,7 +67,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if bool(args.source) != bool(args.evidence):
             raise SystemExit("--source and --evidence must be supplied together")
         if args.source:
-            evidence = Evidence("support", args.source, args.evidence, now)
+            evidence = Evidence("support", args.source, args.evidence, now, channel=args.channel)
         seed = ExperienceSeed.new(
             lesson=args.lesson, guidance=args.guidance,
             context_tags=[tag.strip() for tag in args.tags.split(",")],
@@ -72,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         store.save(seed); _print(seed.to_dict()); return 0
     if args.command == "reinforce":
         seed = _required(store, args.seed_id)
-        evolved = engine.reinforce(seed, Evidence(args.polarity, args.source, args.evidence, now), now)
+        evolved = engine.reinforce(seed, Evidence(args.polarity, args.source, args.evidence, now, channel=args.channel), now)
         store.save(evolved); _print(evolved.to_dict()); return 0
     if args.command == "activate":
         items = engine.activate(args.context, store.list_active(), now, args.limit)

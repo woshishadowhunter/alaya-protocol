@@ -11,16 +11,16 @@ seed = ExperienceSeed.new(
     context_tags=["community", "renewal", "stakeholder", "project"],
     applicability="Projects involving residents, property managers, developers, and regulators",
     counterexamples=["Emergency safety work requiring immediate statutory action"],
-    evidence=Evidence("support", "renewal-review-1", "A complete plan triggered resistance", now),
+    evidence=Evidence("support", "renewal-review-1", "A complete plan triggered resistance", now, channel="direct"),
     now=now,
 )
 seed = engine.reinforce(
     seed,
-    Evidence("support", "renewal-review-2", "Interest mapping produced an executable minimum agreement", now),
+    Evidence("support", "renewal-review-2", "Interest mapping produced an executable minimum agreement", now, channel="direct"),
 )
 seed = engine.reinforce(
     seed,
-    Evidence("support", "renewal-review-3", "Alignment workshop resolved a 6-month deadlock", now),
+    Evidence("support", "renewal-review-3", "Alignment workshop resolved a 6-month deadlock", now, channel="direct"),
 )
 
 for match in engine.activate("A community renewal project with residents and property managers", [seed], now):

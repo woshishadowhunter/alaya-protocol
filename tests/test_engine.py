@@ -17,7 +17,7 @@ def candidate():
         guidance="Start with stakeholder mapping and a resistance check.",
         context_tags=["project", "stakeholder", "community"],
         applicability="Multi-party projects",
-        evidence=Evidence("support", "case-1", "Early design was rejected", NOW),
+        evidence=Evidence("support", "case-1", "Early design was rejected", NOW, channel="direct"),
         now=NOW,
     )
 
@@ -37,47 +37,46 @@ class CustomPolicy:
     principle_contradiction_loss = 0.1
     speculative_half_life = 60.0
     principle_half_life = 200.0
+    direct_gain = 0.3
+    reflective_gain = 0.15
+    interactive_gain = 0.2
+    direct_support_weight = 1.0
+    reflective_support_weight = 0.5
+    interactive_support_weight = 0.7
+    min_channels_for_principle = 2
 
-    def should_promote(self, supports: int) -> bool:
+    def should_promote(self, supports):
         return supports >= self.min_support
-
-    def should_deprecate(self, confidence: float) -> bool:
+    def should_deprecate(self, confidence):
         return confidence < self.deprecate_below
-
-    def confidence_delta(self, polarity: str) -> float:
+    def confidence_delta(self, polarity):
         return self.support_gain if polarity == "support" else -self.contradiction_loss
-
-    def decay_factor(self, days: float) -> float:
-        import math
-        return math.pow(0.5, days / self.half_life_days)
-
-    def half_life_for(self, nature: Nature) -> float:
-        if nature == "speculative":
-            return self.speculative_half_life
-        if nature == "principle":
-            return self.principle_half_life
+    def decay_factor(self, days):
+        import math; return math.pow(0.5, days / self.half_life_days)
+    def half_life_for(self, nature):
+        if nature == "speculative": return self.speculative_half_life
+        if nature == "principle": return self.principle_half_life
         return self.half_life_days
-
-    def contradiction_loss_for(self, nature: Nature) -> float:
-        if nature == "speculative":
-            return self.speculative_contradiction_loss
-        if nature == "principle":
-            return self.principle_contradiction_loss
+    def contradiction_loss_for(self, nature):
+        if nature == "speculative": return self.speculative_contradiction_loss
+        if nature == "principle": return self.principle_contradiction_loss
         return self.contradiction_loss
-
-    def counterexample_penalty_for(self, nature: Nature) -> float:
-        if nature == "speculative":
-            return 0.2
-        if nature == "principle":
-            return 0.5
+    def counterexample_penalty_for(self, nature):
+        if nature == "speculative": return 0.2
+        if nature == "principle": return 0.5
         return self.counterexample_penalty
-
-    def confidence_weight_for(self, nature: Nature) -> float:
-        if nature == "speculative":
-            return 0.2
-        if nature == "principle":
-            return 0.4
+    def confidence_weight_for(self, nature):
+        if nature == "speculative": return 0.2
+        if nature == "principle": return 0.4
         return 0.3
+    def gain_for(self, channel):
+        if channel == "direct": return self.direct_gain
+        if channel == "interactive": return self.interactive_gain
+        return self.reflective_gain
+    def support_weight_for(self, channel):
+        if channel == "direct": return self.direct_support_weight
+        if channel == "interactive": return self.interactive_support_weight
+        return self.reflective_support_weight
 
 
 class FakeEmbeddingBackend:
@@ -93,28 +92,28 @@ class EngineTests(unittest.TestCase):
     def setUp(self):
         self.engine = ExperienceEngine(EvolutionPolicy(min_support=2))
 
-    def test_speculative_promotes_after_three_supports(self):
+    def test_speculative_promotes_after_three_direct_supports(self):
         seed = candidate()
-        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW))
-        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Great", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW, channel="direct"))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Great", NOW, channel="direct"))
         self.assertEqual(seed.status, "active")
         self.assertEqual(seed.support_count, 3)
 
     def test_second_independent_support_still_candidate_for_speculative(self):
         seed = candidate()
-        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW, channel="direct"))
         self.assertEqual(seed.status, "candidate")
         self.assertEqual(seed.support_count, 2)
 
     def test_duplicate_source_does_not_increase_support(self):
         seed = candidate()
-        seed = self.engine.reinforce(seed, Evidence("support", "case-1", "Repeated note", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-1", "Repeated note", NOW, channel="direct"))
         self.assertEqual(seed.support_count, 1)
         self.assertEqual(seed.status, "candidate")
 
     def test_contradiction_reduces_confidence_and_is_retained(self):
         seed = candidate()
-        seed = self.engine.reinforce(seed, Evidence("contradict", "case-3", "Rapid draft created alignment", NOW))
+        seed = self.engine.reinforce(seed, Evidence("contradict", "case-3", "Rapid draft created alignment", NOW, channel="direct"))
         self.assertLess(seed.confidence, candidate().confidence)
         self.assertEqual(seed.contradiction_count, 1)
         self.assertEqual(len(seed.evidence), 2)
@@ -134,7 +133,7 @@ class EngineTests(unittest.TestCase):
         seed = candidate()
         for _ in range(5):
             seed = self.engine.reinforce(
-                seed, Evidence("contradict", f"case-{seed.contradiction_count+10}", "Bad", NOW)
+                seed, Evidence("contradict", f"case-{seed.contradiction_count+10}", "Bad", NOW, channel="direct")
             )
         self.assertGreaterEqual(seed.confidence, 0.0)
 
@@ -142,14 +141,14 @@ class EngineTests(unittest.TestCase):
         seed = candidate()
         for i in range(10):
             seed = self.engine.reinforce(
-                seed, Evidence("support", f"case-{i+10}", "Great", NOW)
+                seed, Evidence("support", f"case-{i+10}", "Great", NOW, channel="direct")
             )
         self.assertLessEqual(seed.confidence, 1.0)
 
     def test_activation_explains_relevance(self):
         seed = candidate()
-        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Worked", NOW))
-        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Worked", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Worked", NOW, channel="direct"))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Worked", NOW, channel="direct"))
         unrelated = ExperienceSeed.new(
             lesson="Prepare meals on Sunday.", guidance="Batch cook.",
             context_tags=["health", "food"], applicability="Weekly meal planning",
@@ -269,6 +268,50 @@ class EngineTests(unittest.TestCase):
         self.assertIn("project", act.explanation)
 
 
+class ChannelTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = ExperienceEngine()
+
+    def test_direct_evidence_counts_fully(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "src-1", "Tool output confirmed", NOW, channel="direct"), now=NOW,
+        )
+        self.assertEqual(seed.confidence, 0.5)
+        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "Also confirmed", NOW, channel="direct"))
+        self.assertGreater(seed.confidence, 0.5 + 0.15 - 0.01)
+
+    def test_reflective_evidence_half_weight_gain(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "src-1", "LLM suggested", NOW, channel="reflective"), now=NOW,
+        )
+        self.assertEqual(seed.confidence, 0.5)
+        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "LLM again", NOW, channel="reflective"))
+        self.assertAlmostEqual(seed.confidence, 0.575)  # 0.5 + 0.075
+
+    def test_mixed_channels_enable_promotion(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "src-1", "Tool output", NOW, channel="direct"), now=NOW,
+        )
+        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "LLM reflection", NOW, channel="reflective"))
+        seed = self.engine.reinforce(seed, Evidence("support", "src-3", "User feedback", NOW, channel="interactive"))
+        # weighted: 1.0 + 0.5 + 0.7 = 2.2 < 3, still candidate
+        self.assertEqual(seed.status, "candidate")
+        self.assertEqual(seed.distinct_channels, {"direct", "reflective", "interactive"})
+
+    def test_single_channel_cannot_reach_principle(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "src-1", "Good", NOW, channel="direct"), now=NOW,
+        )
+        for i in range(8):
+            seed = self.engine.reinforce(seed, Evidence("support", f"src-{i+2}", "Great", NOW, channel="direct"))
+        # With many supports it reaches conditional, but single-channel blocks principle
+        self.assertEqual(seed.nature, "conditional")
+
+
 class NatureTests(unittest.TestCase):
     def setUp(self):
         self.engine = ExperienceEngine()
@@ -297,40 +340,26 @@ class NatureTests(unittest.TestCase):
         self.assertEqual(seed.nature, "speculative")
 
     def test_contradiction_reduces_confidence_more_for_speculative(self):
-        spec = ExperienceSeed.new(
-            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
-            confidence=0.5, nature="speculative",
-        )
-        cond = ExperienceSeed.new(
-            lesson="L2", guidance="G2", context_tags=["x"], applicability="Y",
-            confidence=0.5, nature="conditional",
-        )
-        spec_ev = self.engine.reinforce(spec, Evidence("contradict", "src-1", "Bad", NOW))
-        cond_ev = self.engine.reinforce(cond, Evidence("contradict", "src-1", "Bad", NOW))
+        spec = ExperienceSeed.new(lesson="L", guidance="G", context_tags=["x"], applicability="Y", confidence=0.5, nature="speculative")
+        cond = ExperienceSeed.new(lesson="L2", guidance="G2", context_tags=["x"], applicability="Y", confidence=0.5, nature="conditional")
+        spec_ev = self.engine.reinforce(spec, Evidence("contradict", "src-1", "Bad", NOW, channel="direct"))
+        cond_ev = self.engine.reinforce(cond, Evidence("contradict", "src-1", "Bad", NOW, channel="direct"))
         self.assertLess(spec_ev.confidence, cond_ev.confidence)
 
-    def test_nature_promotes_to_conditional_after_three_supports(self):
+    def test_nature_promotes_to_conditional_after_three_direct_supports(self):
         seed = ExperienceSeed.new(
             lesson="L", guidance="G", context_tags=["x"], applicability="Y",
-            evidence=Evidence("support", "src-1", "Good", NOW), now=NOW,
+            evidence=Evidence("support", "src-1", "Good", NOW, channel="direct"), now=NOW,
         )
-        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "Good", NOW))
-        seed = self.engine.reinforce(seed, Evidence("support", "src-3", "Good", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "Good", NOW, channel="direct"))
+        seed = self.engine.reinforce(seed, Evidence("support", "src-3", "Good", NOW, channel="direct"))
         self.assertEqual(seed.nature, "conditional")
         self.assertEqual(seed.status, "active")
 
     def test_principle_has_higher_activation_score(self):
         engine = ExperienceEngine()
-        spec = ExperienceSeed.new(
-            lesson="Spec lesson", guidance="Spec G",
-            context_tags=["stakeholder", "project"], applicability="Y",
-            status="active", nature="speculative", confidence=0.6, now=NOW,
-        )
-        prin = ExperienceSeed.new(
-            lesson="Prin lesson", guidance="Prin G",
-            context_tags=["stakeholder", "project"], applicability="Y",
-            status="active", nature="principle", confidence=0.6, now=NOW,
-        )
+        spec = ExperienceSeed.new(lesson="Spec lesson", guidance="Spec G", context_tags=["stakeholder", "project"], applicability="Y", status="active", nature="speculative", confidence=0.6, now=NOW)
+        prin = ExperienceSeed.new(lesson="Prin lesson", guidance="Prin G", context_tags=["stakeholder", "project"], applicability="Y", status="active", nature="principle", confidence=0.6, now=NOW)
         results = engine.activate("stakeholder project", [spec, prin], NOW)
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0].seed.id, prin.id)
@@ -339,15 +368,19 @@ class NatureTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ExperienceSeed.new(lesson="L", guidance="G", context_tags=["x"], applicability="Y", nature="invalid")
 
+    def test_invalid_channel_rejected(self):
+        with self.assertRaises(ValueError):
+            Evidence("support", "src", "summary", NOW, channel="invalid")
+
 
 class CustomPolicyTests(unittest.TestCase):
     def test_custom_policy_promotes_after_one_support(self):
         engine = ExperienceEngine(CustomPolicy())
         seed = ExperienceSeed.new(
             lesson="L", guidance="G", context_tags=["x"], applicability="Y",
-            evidence=Evidence("support", "case-1", "Good", NOW), now=NOW,
+            evidence=Evidence("support", "case-1", "Good", NOW, channel="direct"), now=NOW,
         )
-        evolved = engine.reinforce(seed, Evidence("support", "case-2", "Great", NOW))
+        evolved = engine.reinforce(seed, Evidence("support", "case-2", "Great", NOW, channel="direct"))
         self.assertEqual(evolved.status, "active")
         self.assertGreater(evolved.confidence, seed.confidence)
 

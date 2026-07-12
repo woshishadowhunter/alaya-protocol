@@ -22,17 +22,20 @@ class CliTests(unittest.TestCase):
                     "--tags", "project,stakeholder",
                     "--applies", "multi-party project",
                     "--source", "case-1",
-                    "--evidence", "Draft failed"]), 0)
+                    "--evidence", "Draft failed",
+                    "--channel", "direct"]), 0)
             seed_id = json.loads(out.getvalue())["id"]
 
             with redirect_stdout(StringIO()):
                 self.assertEqual(main(["--db", db, "reinforce", seed_id,
                     "--polarity", "support", "--source", "case-2",
-                    "--evidence", "Alignment worked"]), 0)
+                    "--evidence", "Alignment worked",
+                    "--channel", "direct"]), 0)
             with redirect_stdout(StringIO()):
                 self.assertEqual(main(["--db", db, "reinforce", seed_id,
                     "--polarity", "support", "--source", "case-3",
-                    "--evidence", "Third confirmation"]), 0)
+                    "--evidence", "Third confirmation",
+                    "--channel", "direct"]), 0)
 
             activated = StringIO()
             with redirect_stdout(activated):

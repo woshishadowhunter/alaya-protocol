@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from .models import Decision, Evidence, ExperienceSeed, Nature, Observation, utc_now
+from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation, utc_now
 
 
 class PolicyProtocol(Protocol):
@@ -97,6 +97,13 @@ class EvolutionPolicy:
     principle_contradiction_loss: float = 0.15
     speculative_half_life: float = 90.0
     principle_half_life: float = 365.0
+    direct_gain: float = 0.15
+    reflective_gain: float = 0.075
+    interactive_gain: float = 0.10
+    direct_support_weight: float = 1.0
+    reflective_support_weight: float = 0.5
+    interactive_support_weight: float = 0.7
+    min_channels_for_principle: int = 2
 
     def should_promote(self, supports: int) -> bool:
         return supports >= self.min_support
@@ -138,6 +145,20 @@ class EvolutionPolicy:
             return 0.4
         return 0.3
 
+    def gain_for(self, channel: Channel) -> float:
+        if channel == "direct":
+            return self.direct_gain
+        if channel == "interactive":
+            return self.interactive_gain
+        return self.reflective_gain
+
+    def support_weight_for(self, channel: Channel) -> float:
+        if channel == "direct":
+            return self.direct_support_weight
+        if channel == "interactive":
+            return self.interactive_support_weight
+        return self.reflective_support_weight
+
 
 @dataclass(frozen=True)
 class Activation:
@@ -173,18 +194,22 @@ class ExperienceEngine:
             return seed
         timestamp = now or evidence.observed_at
         if evidence.polarity == "support":
-            change = self.policy.support_gain
+            change = self.policy.gain_for(evidence.channel)
         else:
             change = -self.policy.contradiction_loss_for(seed.nature)
         confidence = min(1.0, max(0.0, seed.confidence + change))
         items = seed.evidence + (evidence,)
-        supports = len({e.source_id for e in items if e.polarity == "support"})
+        weighted_supports = sum(
+            self.policy.support_weight_for(e.channel)
+            for e in {e.source_id: e for e in items if e.polarity == "support"}.values()
+        )
         contradicts = len({e.source_id for e in items if e.polarity == "contradict"})
+        channels = {e.channel for e in items}
         status = seed.status
-        nature = self._evolve_nature(seed.nature, supports, contradicts, seed.created_at)
+        nature = self._evolve_nature(seed.nature, weighted_supports, contradicts, channels, seed.created_at)
         if self.policy.should_deprecate(confidence):
             status = "deprecated"
-        elif self._should_activate(nature, supports) and status == "candidate":
+        elif self._should_activate(nature, weighted_supports) and status == "candidate":
             status = "active"
         return seed.with_changes(
             evidence=items, confidence=confidence, status=status, nature=nature, updated_at=timestamp,
@@ -278,13 +303,13 @@ class ExperienceEngine:
             if seed is None:
                 continue
             if observation.polarity == "success":
-                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp, channel="interactive")
                 evolved.append(self.reinforce(seed, ev, timestamp))
             elif observation.polarity == "failure":
-                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp)
+                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp, channel="interactive")
                 evolved.append(self.reinforce(seed, ev, timestamp))
             elif observation.polarity == "mixed":
-                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp, channel="interactive")
                 evolved.append(self.reinforce(seed, ev, timestamp))
 
         for seed_id in decision.excluded_seeds:
@@ -292,32 +317,34 @@ class ExperienceEngine:
             if seed is None:
                 continue
             if observation.polarity == "success":
-                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp)
+                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp, channel="interactive")
                 evolved.append(self.reinforce(seed, ev, timestamp))
             elif observation.polarity == "failure":
-                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp, channel="interactive")
                 evolved.append(self.reinforce(seed, ev, timestamp))
             # mixed: no reinforcement for excluded seeds
 
         return evolved
 
-    def _should_activate(self, nature: Nature, supports: int) -> bool:
+    def _should_activate(self, nature: Nature, weighted_supports: float) -> bool:
         if nature == "speculative":
-            return supports >= self.policy.speculative_promotion
-        return supports >= self.policy.conditional_promotion
+            return weighted_supports >= self.policy.speculative_promotion
+        return weighted_supports >= self.policy.conditional_promotion
 
-    @staticmethod
-    def _evolve_nature(current: Nature, supports: int, contradicts: int, created_at: datetime) -> Nature:
+    def _evolve_nature(self, current: Nature, weighted_supports: float,
+                      contradicts: int, channels: set[Channel], created_at: datetime) -> Nature:
         if current == "speculative":
-            if supports >= 3:
+            if weighted_supports >= 3:
                 return "conditional"
         elif current == "conditional":
-            if supports >= 5 and contradicts == 0 and (utc_now() - created_at).days >= 30:
+            if (weighted_supports >= 5 and contradicts == 0
+                    and (utc_now() - created_at).days >= 30
+                    and len(channels) >= self.policy.min_channels_for_principle):
                 return "principle"
             if contradicts >= 1:
                 return "speculative"
         elif current == "principle":
-            if contradicts >= 3:
+            if contradicts >= self.policy.principle_min_contradictions:
                 return "conditional"
         return current
 

@@ -9,6 +9,7 @@ Polarity = Literal["support", "contradict"]
 Status = Literal["candidate", "active", "deprecated"]
 Nature = Literal["speculative", "conditional", "principle"]
 OutcomePolarity = Literal["success", "failure", "mixed"]
+Channel = Literal["direct", "reflective", "interactive"]
 
 
 def utc_now() -> datetime:
@@ -28,10 +29,13 @@ class Evidence:
     source_id: str
     summary: str
     observed_at: datetime = field(default_factory=utc_now)
+    channel: Channel = "reflective"
 
     def __post_init__(self) -> None:
         if self.polarity not in ("support", "contradict"):
             raise ValueError("polarity must be support or contradict")
+        if self.channel not in ("direct", "reflective", "interactive"):
+            raise ValueError("channel must be direct, reflective, or interactive")
         if not self.source_id.strip() or not self.summary.strip():
             raise ValueError("evidence requires source_id and summary")
         _dt(self.observed_at)
@@ -42,11 +46,15 @@ class Evidence:
             "source_id": self.source_id,
             "summary": self.summary,
             "observed_at": self.observed_at.isoformat(),
+            "channel": self.channel,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Evidence":
-        return cls(data["polarity"], data["source_id"], data["summary"], _dt(data["observed_at"]))
+        return cls(
+            data["polarity"], data["source_id"], data["summary"],
+            _dt(data["observed_at"]), data.get("channel", "reflective"),
+        )
 
 
 @dataclass(frozen=True)
@@ -88,6 +96,10 @@ class ExperienceSeed:
     @property
     def contradiction_count(self) -> int:
         return len({e.source_id for e in self.evidence if e.polarity == "contradict"})
+
+    @property
+    def distinct_channels(self) -> set[Channel]:
+        return {e.channel for e in self.evidence}
 
     @classmethod
     def new(

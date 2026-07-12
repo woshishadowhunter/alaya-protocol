@@ -126,11 +126,11 @@ class FeedbackLoopTests(unittest.TestCase):
             guidance="Map interests first.",
             context_tags=["stakeholder", "project"],
             applicability="Multi-party projects",
-            evidence=Evidence("support", "src-1", "Mapping resolved conflict", NOW),
+            evidence=Evidence("support", "src-1", "Mapping resolved conflict", NOW, channel="direct"),
             now=NOW,
         )
-        seed = engine.reinforce(seed, Evidence("support", "src-2", "Workshop succeeded", NOW))
-        seed = engine.reinforce(seed, Evidence("support", "src-3", "Third confirmation", NOW))
+        seed = engine.reinforce(seed, Evidence("support", "src-2", "Workshop succeeded", NOW, channel="direct"))
+        seed = engine.reinforce(seed, Evidence("support", "src-3", "Third confirmation", NOW, channel="direct"))
         self.assertEqual(seed.nature, "conditional")
 
         decision, activations = engine.apply(
