@@ -58,10 +58,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         evolved = engine.reinforce(seed, Evidence(args.polarity, args.source, args.evidence, now), now)
         store.save(evolved); _print(evolved.to_dict()); return 0
     if args.command == "activate":
-        items = engine.activate(args.context, store.list(), now, args.limit)
-        _print([{"seed": item.seed.to_dict(), "score": item.score, "relevance": item.relevance, "explanation": item.explanation} for item in items]); return 0
+        items = engine.activate(args.context, store.list_active(), now, args.limit)
+        _print([{"seed": item.seed.to_dict(), "score": item.score, "relevance": item.relevance,
+                 "confidence": item.confidence, "recency": item.recency,
+                 "matched_terms": list(item.matched_terms),
+                 "explanation": item.explanation} for item in items]); return 0
     if args.command == "list":
-        _print([seed.to_dict() for seed in store.list()]); return 0
+        _print([seed.to_dict() for seed in store.list_active(since_days=3650)]); return 0
     if args.command == "show":
         _print(_required(store, args.seed_id).to_dict()); return 0
     if args.command == "export":

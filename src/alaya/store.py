@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Iterator
 
 from .models import ExperienceSeed
 
@@ -43,10 +44,37 @@ class SQLiteSeedStore:
             cursor = connection.execute("DELETE FROM seeds WHERE id=?", (seed_id,))
         return cursor.rowcount > 0
 
+    def list_active(self, since_days: int = 180) -> list[ExperienceSeed]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM seeds WHERE json_extract(payload, '$.status') = 'active' "
+                "AND json_extract(payload, '$.updated_at') >= date('now', ? || ' days') "
+                "ORDER BY updated_at DESC, id",
+                (str(-since_days),),
+            ).fetchall()
+        return [ExperienceSeed.from_dict(json.loads(row[0])) for row in rows]
+
+    def count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM seeds").fetchone()
+        return row[0] if row else 0
+
+    def iter_all(self, batch_size: int = 100) -> Iterator[list[ExperienceSeed]]:
+        with self._connect() as connection:
+            cursor = connection.execute("SELECT payload FROM seeds ORDER BY updated_at DESC, id")
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    break
+                yield [ExperienceSeed.from_dict(json.loads(r[0])) for r in rows]
+
     def close(self) -> None:
         """Release any lingering resources. Safe to call multiple times."""
         pass
 
     def export_json(self) -> str:
-        return json.dumps([seed.to_dict() for seed in self.list()], ensure_ascii=False, indent=2)
+        result: list[dict[str, object]] = []
+        for batch in self.iter_all(200):
+            result.extend(seed.to_dict() for seed in batch)
+        return json.dumps(result, ensure_ascii=False, indent=2)
 

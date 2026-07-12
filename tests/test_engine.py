@@ -1,7 +1,10 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from alaya.engine import EvolutionPolicy, ExperienceEngine
+from alaya.engine import (
+    Activation, EvolutionPolicy, ExperienceEngine, LexicalRetrieval,
+    PolicyProtocol, RetrievalBackend,
+)
 from alaya.models import Evidence, ExperienceSeed
 
 
@@ -17,6 +20,37 @@ def candidate():
         evidence=Evidence("support", "case-1", "Early design was rejected", NOW),
         now=NOW,
     )
+
+
+class CustomPolicy:
+    min_support = 1
+    support_gain = 0.3
+    contradiction_loss = 0.1
+    deprecate_below = 0.1
+    half_life_days = 90.0
+    counterexample_penalty = 0.5
+
+    def should_promote(self, supports: int) -> bool:
+        return supports >= self.min_support
+
+    def should_deprecate(self, confidence: float) -> bool:
+        return confidence < self.deprecate_below
+
+    def confidence_delta(self, polarity: str) -> float:
+        return self.support_gain if polarity == "support" else -self.contradiction_loss
+
+    def decay_factor(self, days: float) -> float:
+        import math
+        return math.pow(0.5, days / self.half_life_days)
+
+
+class FakeEmbeddingBackend:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] if "stakeholder" in t else [0.0, 1.0] for t in texts]
+
+    def similarity(self, a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        return max(0.0, dot)
 
 
 class EngineTests(unittest.TestCase):
@@ -89,7 +123,7 @@ class EngineTests(unittest.TestCase):
         self.assertIn("confidence", results[0].explanation)
 
     def test_activate_skips_non_active_seeds(self):
-        c = candidate()  # status = "candidate"
+        c = candidate()
         results = self.engine.activate("stakeholder project", [c], NOW)
         self.assertEqual(len(results), 0)
 
@@ -126,3 +160,86 @@ class EngineTests(unittest.TestCase):
         )
         decayed = self.engine.decay(seed, NOW + timedelta(days=400))
         self.assertEqual(decayed.status, "deprecated")
+
+    def test_counterexample_reduces_activation_score(self):
+        seed = ExperienceSeed.new(
+            lesson="Negotiate with all parties first.",
+            guidance="Map interests before planning.",
+            context_tags=["project", "stakeholder"],
+            applicability="Multi-party projects",
+            counterexamples=["Emergency safety work"],
+            status="active", confidence=0.7, now=NOW,
+        )
+        no_penalty = self.engine.activate("planning a community project", [seed], NOW)
+        penalized = self.engine.activate("emergency safety work on the building", [seed], NOW)
+        if len(penalized) > 0 and len(no_penalty) > 0:
+            self.assertLess(penalized[0].score, no_penalty[0].score)
+
+    def test_counterexample_no_match_no_penalty(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["project"], applicability="Y",
+            counterexamples=["Emergency work"], status="active", confidence=0.7, now=NOW,
+        )
+        results = self.engine.activate("planning a regular project", [seed], NOW)
+        self.assertEqual(len(results), 1)
+        self.assertGreater(results[0].relevance, 0)
+
+    def test_activation_has_structured_fields(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["stakeholder", "project"],
+            applicability="Projects", status="active", confidence=0.7, now=NOW,
+        )
+        results = self.engine.activate("stakeholder project planning", [seed], NOW)
+        self.assertEqual(len(results), 1)
+        act = results[0]
+        self.assertGreater(act.confidence, 0)
+        self.assertGreater(act.recency, 0)
+        self.assertEqual(act.confidence, seed.confidence)
+        self.assertIn("stakeholder", act.matched_terms)
+        self.assertIn("project", act.matched_terms)
+        self.assertIn("confidence", act.explanation)
+
+    def test_lexical_retrieval_is_default(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["stakeholder"], applicability="Y",
+            status="active", confidence=0.7, now=NOW,
+        )
+        results = self.engine.activate("stakeholder meeting", [seed], NOW)
+        self.assertEqual(len(results), 1)
+        self.assertGreater(results[0].relevance, 0)
+
+    def test_activation_create_factory(self):
+        seed = candidate()
+        act = Activation.create(
+            seed, relevance=0.8, confidence=0.7, recency=0.9,
+            matched_terms=("project", "stakeholder"),
+        )
+        self.assertAlmostEqual(act.score, 0.8 * 0.6 + 0.7 * 0.3 + 0.9 * 0.1)
+        self.assertEqual(act.confidence, 0.7)
+        self.assertEqual(act.recency, 0.9)
+        self.assertIn("project", act.explanation)
+
+
+class CustomPolicyTests(unittest.TestCase):
+    def test_custom_policy_promotes_after_one_support(self):
+        engine = ExperienceEngine(CustomPolicy())
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "case-1", "Good", NOW), now=NOW,
+        )
+        evolved = engine.reinforce(seed, Evidence("support", "case-2", "Great", NOW))
+        self.assertEqual(evolved.status, "active")
+        self.assertGreater(evolved.confidence, seed.confidence)
+
+
+class RetrievalBackendTests(unittest.TestCase):
+    def test_custom_backend_used_for_scoring(self):
+        engine = ExperienceEngine()
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["stakeholder"], applicability="Y",
+            status="active", confidence=0.7, now=NOW,
+        )
+        backend = FakeEmbeddingBackend()
+        results = engine.activate("stakeholder planning", [seed], NOW, backend=backend)
+        self.assertEqual(len(results), 1)
+        self.assertGreater(results[0].relevance, 0)
