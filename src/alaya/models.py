@@ -7,6 +7,7 @@ from uuid import uuid4
 
 Polarity = Literal["support", "contradict"]
 Status = Literal["candidate", "active", "deprecated"]
+Nature = Literal["speculative", "conditional", "principle"]
 
 
 def utc_now() -> datetime:
@@ -57,6 +58,7 @@ class ExperienceSeed:
     counterexamples: tuple[str, ...]
     confidence: float
     status: Status
+    nature: Nature
     evidence: tuple[Evidence, ...]
     created_at: datetime
     updated_at: datetime
@@ -72,6 +74,8 @@ class ExperienceSeed:
             raise ValueError("confidence must be between 0 and 1")
         if self.status not in ("candidate", "active", "deprecated"):
             raise ValueError("invalid status")
+        if self.nature not in ("speculative", "conditional", "principle"):
+            raise ValueError("invalid nature")
         _dt(self.created_at); _dt(self.updated_at)
         if self.last_activated_at is not None:
             _dt(self.last_activated_at)
@@ -88,7 +92,8 @@ class ExperienceSeed:
     def new(
         cls, *, lesson: str, guidance: str, context_tags: list[str], applicability: str,
         counterexamples: list[str] | None = None, confidence: float = 0.5,
-        status: Status = "candidate", evidence: Evidence | None = None,
+        status: Status = "candidate", nature: Nature = "speculative",
+        evidence: Evidence | None = None,
         now: datetime | None = None,
     ) -> "ExperienceSeed":
         timestamp = now or utc_now()
@@ -96,7 +101,8 @@ class ExperienceSeed:
             id=str(uuid4()), lesson=lesson, guidance=guidance,
             context_tags=tuple(dict.fromkeys(t.strip().lower() for t in context_tags if t.strip())),
             applicability=applicability, counterexamples=tuple(counterexamples or ()),
-            confidence=confidence, status=status, evidence=(evidence,) if evidence else (),
+            confidence=confidence, status=status, nature=nature,
+            evidence=(evidence,) if evidence else (),
             created_at=timestamp, updated_at=timestamp,
         )
 
@@ -108,7 +114,7 @@ class ExperienceSeed:
             "schema_version": self.schema_version, "id": self.id, "lesson": self.lesson,
             "guidance": self.guidance, "context_tags": list(self.context_tags),
             "applicability": self.applicability, "counterexamples": list(self.counterexamples),
-            "confidence": self.confidence, "status": self.status,
+            "confidence": self.confidence, "status": self.status, "nature": self.nature,
             "evidence": [item.to_dict() for item in self.evidence],
             "created_at": self.created_at.isoformat(), "updated_at": self.updated_at.isoformat(),
             "last_activated_at": self.last_activated_at.isoformat() if self.last_activated_at else None,
@@ -119,10 +125,12 @@ class ExperienceSeed:
         return cls(
             id=data["id"], lesson=data["lesson"], guidance=data["guidance"],
             context_tags=tuple(data["context_tags"]), applicability=data["applicability"],
-            counterexamples=tuple(data.get("counterexamples", ())), confidence=float(data["confidence"]),
-            status=data["status"], evidence=tuple(Evidence.from_dict(e) for e in data.get("evidence", ())),
+            counterexamples=tuple(data.get("counterexamples", ())),
+            confidence=float(data["confidence"]),
+            status=data["status"],
+            nature=data.get("nature", "speculative"),
+            evidence=tuple(Evidence.from_dict(e) for e in data.get("evidence", ())),
             created_at=_dt(data["created_at"]), updated_at=_dt(data["updated_at"]),
             last_activated_at=_dt(data["last_activated_at"]) if data.get("last_activated_at") else None,
             schema_version=data.get("schema_version", "1.0"),
         )
-

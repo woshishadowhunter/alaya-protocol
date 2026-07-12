@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from .engine import ExperienceEngine
-from .models import Evidence, ExperienceSeed
+from .engine import EvolutionPolicy, ExperienceEngine
+from .models import Evidence, ExperienceSeed, Nature
 from .store import SQLiteSeedStore
 
 
@@ -17,9 +17,13 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
 
     plant = commands.add_parser("plant", help="Plant a candidate experience seed")
-    plant.add_argument("--lesson", required=True); plant.add_argument("--guidance", required=True)
-    plant.add_argument("--tags", required=True); plant.add_argument("--applies", required=True)
-    plant.add_argument("--source"); plant.add_argument("--evidence")
+    plant.add_argument("--lesson", required=True)
+    plant.add_argument("--guidance", required=True)
+    plant.add_argument("--tags", required=True)
+    plant.add_argument("--applies", required=True)
+    plant.add_argument("--source")
+    plant.add_argument("--evidence")
+    plant.add_argument("--nature", choices=["speculative", "conditional", "principle"], default="speculative")
 
     reinforce = commands.add_parser("reinforce", help="Add independent evidence")
     reinforce.add_argument("seed_id"); reinforce.add_argument("--polarity", choices=["support", "contradict"], required=True)
@@ -50,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed = ExperienceSeed.new(
             lesson=args.lesson, guidance=args.guidance,
             context_tags=[tag.strip() for tag in args.tags.split(",")],
-            applicability=args.applies, evidence=evidence, now=now,
+            applicability=args.applies, nature=args.nature, evidence=evidence, now=now,
         )
         store.save(seed); _print(seed.to_dict()); return 0
     if args.command == "reinforce":

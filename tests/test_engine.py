@@ -5,7 +5,7 @@ from alaya.engine import (
     Activation, EvolutionPolicy, ExperienceEngine, LexicalRetrieval,
     PolicyProtocol, RetrievalBackend,
 )
-from alaya.models import Evidence, ExperienceSeed
+from alaya.models import Evidence, ExperienceSeed, Nature
 
 
 NOW = datetime(2026, 7, 12, tzinfo=timezone.utc)
@@ -29,6 +29,14 @@ class CustomPolicy:
     deprecate_below = 0.1
     half_life_days = 90.0
     counterexample_penalty = 0.5
+    speculative_promotion = 1
+    conditional_promotion = 1
+    principle_auto_promotion_supports = 3
+    principle_min_contradictions = 2
+    speculative_contradiction_loss = 0.15
+    principle_contradiction_loss = 0.1
+    speculative_half_life = 60.0
+    principle_half_life = 200.0
 
     def should_promote(self, supports: int) -> bool:
         return supports >= self.min_support
@@ -42,6 +50,34 @@ class CustomPolicy:
     def decay_factor(self, days: float) -> float:
         import math
         return math.pow(0.5, days / self.half_life_days)
+
+    def half_life_for(self, nature: Nature) -> float:
+        if nature == "speculative":
+            return self.speculative_half_life
+        if nature == "principle":
+            return self.principle_half_life
+        return self.half_life_days
+
+    def contradiction_loss_for(self, nature: Nature) -> float:
+        if nature == "speculative":
+            return self.speculative_contradiction_loss
+        if nature == "principle":
+            return self.principle_contradiction_loss
+        return self.contradiction_loss
+
+    def counterexample_penalty_for(self, nature: Nature) -> float:
+        if nature == "speculative":
+            return 0.2
+        if nature == "principle":
+            return 0.5
+        return self.counterexample_penalty
+
+    def confidence_weight_for(self, nature: Nature) -> float:
+        if nature == "speculative":
+            return 0.2
+        if nature == "principle":
+            return 0.4
+        return 0.3
 
 
 class FakeEmbeddingBackend:
@@ -57,27 +93,31 @@ class EngineTests(unittest.TestCase):
     def setUp(self):
         self.engine = ExperienceEngine(EvolutionPolicy(min_support=2))
 
-    def test_second_independent_support_promotes_candidate(self):
-        evolved = self.engine.reinforce(
-            candidate(), Evidence("support", "case-2", "Alignment unlocked delivery", NOW)
-        )
-        self.assertEqual(evolved.status, "active")
-        self.assertEqual(evolved.support_count, 2)
+    def test_speculative_promotes_after_three_supports(self):
+        seed = candidate()
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Great", NOW))
+        self.assertEqual(seed.status, "active")
+        self.assertEqual(seed.support_count, 3)
+
+    def test_second_independent_support_still_candidate_for_speculative(self):
+        seed = candidate()
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Good", NOW))
+        self.assertEqual(seed.status, "candidate")
+        self.assertEqual(seed.support_count, 2)
 
     def test_duplicate_source_does_not_increase_support(self):
-        evolved = self.engine.reinforce(
-            candidate(), Evidence("support", "case-1", "Repeated note", NOW)
-        )
-        self.assertEqual(evolved.support_count, 1)
-        self.assertEqual(evolved.status, "candidate")
+        seed = candidate()
+        seed = self.engine.reinforce(seed, Evidence("support", "case-1", "Repeated note", NOW))
+        self.assertEqual(seed.support_count, 1)
+        self.assertEqual(seed.status, "candidate")
 
     def test_contradiction_reduces_confidence_and_is_retained(self):
-        evolved = self.engine.reinforce(
-            candidate(), Evidence("contradict", "case-3", "Rapid draft created alignment", NOW)
-        )
-        self.assertLess(evolved.confidence, candidate().confidence)
-        self.assertEqual(evolved.contradiction_count, 1)
-        self.assertEqual(len(evolved.evidence), 2)
+        seed = candidate()
+        seed = self.engine.reinforce(seed, Evidence("contradict", "case-3", "Rapid draft created alignment", NOW))
+        self.assertLess(seed.confidence, candidate().confidence)
+        self.assertEqual(seed.contradiction_count, 1)
+        self.assertEqual(len(seed.evidence), 2)
 
     def test_decay_is_deterministic_and_does_not_mutate_seed(self):
         seed = candidate()
@@ -107,18 +147,18 @@ class EngineTests(unittest.TestCase):
         self.assertLessEqual(seed.confidence, 1.0)
 
     def test_activation_explains_relevance(self):
-        relevant = self.engine.reinforce(
-            candidate(), Evidence("support", "case-2", "Worked", NOW)
-        )
+        seed = candidate()
+        seed = self.engine.reinforce(seed, Evidence("support", "case-2", "Worked", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "case-3", "Worked", NOW))
         unrelated = ExperienceSeed.new(
             lesson="Prepare meals on Sunday.", guidance="Batch cook.",
             context_tags=["health", "food"], applicability="Weekly meal planning",
             status="active", confidence=0.9, now=NOW,
         )
         results = self.engine.activate(
-            "Plan a community project involving property owners", [unrelated, relevant], NOW
+            "Plan a community project involving property owners", [unrelated, seed], NOW
         )
-        self.assertEqual(results[0].seed.id, relevant.id)
+        self.assertEqual(results[0].seed.id, seed.id)
         self.assertGreater(results[0].relevance, 0)
         self.assertIn("confidence", results[0].explanation)
 
@@ -160,6 +200,15 @@ class EngineTests(unittest.TestCase):
         )
         decayed = self.engine.decay(seed, NOW + timedelta(days=400))
         self.assertEqual(decayed.status, "deprecated")
+
+    def test_principle_not_deprecated_by_decay(self):
+        seed = ExperienceSeed.new(
+            lesson="Universal truth", guidance="Always apply",
+            context_tags=["math", "logic"], applicability="All reasoning",
+            status="active", nature="principle", confidence=0.2, now=NOW,
+        )
+        decayed = self.engine.decay(seed, NOW + timedelta(days=1000))
+        self.assertEqual(decayed.status, "active")
 
     def test_counterexample_reduces_activation_score(self):
         seed = ExperienceSeed.new(
@@ -218,6 +267,77 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(act.confidence, 0.7)
         self.assertEqual(act.recency, 0.9)
         self.assertIn("project", act.explanation)
+
+
+class NatureTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = ExperienceEngine()
+
+    def test_speculative_starts_as_default(self):
+        seed = ExperienceSeed.new(lesson="L", guidance="G", context_tags=["x"], applicability="Y")
+        self.assertEqual(seed.nature, "speculative")
+
+    def test_nature_survives_round_trip(self):
+        for n in ("speculative", "conditional", "principle"):
+            seed = ExperienceSeed.new(lesson="L", guidance="G", context_tags=["x"], applicability="Y", nature=n)
+            restored = ExperienceSeed.from_dict(seed.to_dict())
+            self.assertEqual(restored.nature, n)
+
+    def test_old_dict_without_nature_defaults_to_speculative(self):
+        data = {
+            "schema_version": "1.0", "id": "test-id", "lesson": "L", "guidance": "G",
+            "context_tags": ["x"], "applicability": "Y", "counterexamples": [],
+            "confidence": 0.5, "status": "candidate",
+            "evidence": [],
+            "created_at": "2026-07-12T00:00:00+00:00",
+            "updated_at": "2026-07-12T00:00:00+00:00",
+            "last_activated_at": None,
+        }
+        seed = ExperienceSeed.from_dict(data)
+        self.assertEqual(seed.nature, "speculative")
+
+    def test_contradiction_reduces_confidence_more_for_speculative(self):
+        spec = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            confidence=0.5, nature="speculative",
+        )
+        cond = ExperienceSeed.new(
+            lesson="L2", guidance="G2", context_tags=["x"], applicability="Y",
+            confidence=0.5, nature="conditional",
+        )
+        spec_ev = self.engine.reinforce(spec, Evidence("contradict", "src-1", "Bad", NOW))
+        cond_ev = self.engine.reinforce(cond, Evidence("contradict", "src-1", "Bad", NOW))
+        self.assertLess(spec_ev.confidence, cond_ev.confidence)
+
+    def test_nature_promotes_to_conditional_after_three_supports(self):
+        seed = ExperienceSeed.new(
+            lesson="L", guidance="G", context_tags=["x"], applicability="Y",
+            evidence=Evidence("support", "src-1", "Good", NOW), now=NOW,
+        )
+        seed = self.engine.reinforce(seed, Evidence("support", "src-2", "Good", NOW))
+        seed = self.engine.reinforce(seed, Evidence("support", "src-3", "Good", NOW))
+        self.assertEqual(seed.nature, "conditional")
+        self.assertEqual(seed.status, "active")
+
+    def test_principle_has_higher_activation_score(self):
+        engine = ExperienceEngine()
+        spec = ExperienceSeed.new(
+            lesson="Spec lesson", guidance="Spec G",
+            context_tags=["stakeholder", "project"], applicability="Y",
+            status="active", nature="speculative", confidence=0.6, now=NOW,
+        )
+        prin = ExperienceSeed.new(
+            lesson="Prin lesson", guidance="Prin G",
+            context_tags=["stakeholder", "project"], applicability="Y",
+            status="active", nature="principle", confidence=0.6, now=NOW,
+        )
+        results = engine.activate("stakeholder project", [spec, prin], NOW)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0].seed.id, prin.id)
+
+    def test_invalid_nature_rejected(self):
+        with self.assertRaises(ValueError):
+            ExperienceSeed.new(lesson="L", guidance="G", context_tags=["x"], applicability="Y", nature="invalid")
 
 
 class CustomPolicyTests(unittest.TestCase):

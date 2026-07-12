@@ -18,6 +18,10 @@ seed = engine.reinforce(
     seed,
     Evidence("support", "renewal-review-2", "Interest mapping produced an executable minimum agreement", now),
 )
+seed = engine.reinforce(
+    seed,
+    Evidence("support", "renewal-review-3", "Alignment workshop resolved a 6-month deadlock", now),
+)
 
 for match in engine.activate("A community renewal project with residents and property managers", [seed], now):
     print(match.seed.guidance)
