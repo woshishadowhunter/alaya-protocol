@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-from .models import ExperienceSeed
+from .models import Decision, ExperienceSeed
 
 
 class SQLiteSeedStore:
@@ -77,4 +77,46 @@ class SQLiteSeedStore:
         for batch in self.iter_all(200):
             result.extend(seed.to_dict() for seed in batch)
         return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+class DecisionStore:
+    """Lightweight decision log backed by the same SQLite database."""
+
+    def __init__(self, path: str | Path = ".alaya/seeds.db") -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS decisions (id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL)"
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(str(self.path), check_same_thread=False)
+
+    def save(self, decision: Decision) -> None:
+        payload = json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True)
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO decisions(id,payload,created_at) VALUES(?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, created_at=excluded.created_at",
+                (decision.id, payload, decision.created_at.isoformat()),
+            )
+
+    def get(self, decision_id: str) -> Decision | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT payload FROM decisions WHERE id=?", (decision_id,)).fetchone()
+        if row is None:
+            return None
+        data = json.loads(row[0])
+        from datetime import datetime as dt
+        return Decision(
+            id=data["id"], context=data["context"],
+            chosen_seeds=tuple(data["chosen_seeds"]),
+            excluded_seeds=tuple(data["excluded_seeds"]),
+            action=data["action"],
+            created_at=dt.fromisoformat(data["created_at"]),
+        )
+
+    def close(self) -> None:
+        pass
 

@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Sequence
 
 from .engine import EvolutionPolicy, ExperienceEngine
-from .models import Evidence, ExperienceSeed, Nature
-from .store import SQLiteSeedStore
+from .models import Decision, Evidence, ExperienceSeed, Nature, Observation
+from .store import DecisionStore, SQLiteSeedStore
 
 
 def parser() -> argparse.ArgumentParser:
@@ -32,6 +32,18 @@ def parser() -> argparse.ArgumentParser:
     activate = commands.add_parser("activate", help="Find experience relevant to current context")
     activate.add_argument("context"); activate.add_argument("--limit", type=int, default=5)
 
+    apply_cmd = commands.add_parser("apply", help="Record a decision influenced by experience")
+    apply_cmd.add_argument("context")
+    apply_cmd.add_argument("--action", required=True)
+    apply_cmd.add_argument("--choose", required=True, help="Comma-separated seed IDs to adopt")
+    apply_cmd.add_argument("--limit", type=int, default=5)
+
+    observe_cmd = commands.add_parser("observe", help="Observe outcome and auto-reinforce seeds")
+    observe_cmd.add_argument("decision_id")
+    observe_cmd.add_argument("--outcome", required=True)
+    observe_cmd.add_argument("--polarity", choices=["success", "failure", "mixed"], required=True)
+    observe_cmd.add_argument("--source", required=True)
+
     commands.add_parser("list", help="List seeds")
     show = commands.add_parser("show", help="Show one seed"); show.add_argument("seed_id")
     commands.add_parser("export", help="Export portable JSON")
@@ -42,6 +54,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     store = SQLiteSeedStore(Path(args.db))
+    dstore = DecisionStore(Path(args.db))
     engine = ExperienceEngine()
     now = datetime.now(timezone.utc)
 
@@ -73,6 +86,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(_required(store, args.seed_id).to_dict()); return 0
     if args.command == "export":
         print(store.export_json()); return 0
+    if args.command == "apply":
+        chosen = [cid.strip() for cid in args.choose.split(",") if cid.strip()]
+        seeds = store.list_active()
+        decision, activations = engine.apply(args.context, seeds, chosen, args.action, now, args.limit)
+        dstore.save(decision)
+        for a in activations:
+            if a.seed.id in chosen:
+                store.save(a.seed.with_changes(last_activated_at=now))
+        _print({
+            "decision": decision.to_dict(),
+            "activations": [{"seed": a.seed.to_dict(), "score": a.score, "explanation": a.explanation} for a in activations],
+        }); return 0
+    if args.command == "observe":
+        decision = dstore.get(args.decision_id)
+        if decision is None:
+            raise SystemExit(f"decision not found: {args.decision_id}")
+        observation = Observation(args.decision_id, args.outcome, args.polarity, args.source, now)
+        seeds = store.list_active(since_days=3650)
+        evolved = engine.observe(decision, observation, seeds, now)
+        for seed in evolved:
+            store.save(seed)
+        _print([seed.to_dict() for seed in evolved]); return 0
     if args.command == "delete":
         if not store.delete(args.seed_id):
             raise SystemExit(f"seed not found: {args.seed_id}")

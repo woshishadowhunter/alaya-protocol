@@ -8,6 +8,7 @@ from uuid import uuid4
 Polarity = Literal["support", "contradict"]
 Status = Literal["candidate", "active", "deprecated"]
 Nature = Literal["speculative", "conditional", "principle"]
+OutcomePolarity = Literal["success", "failure", "mixed"]
 
 
 def utc_now() -> datetime:
@@ -134,3 +135,63 @@ class ExperienceSeed:
             last_activated_at=_dt(data["last_activated_at"]) if data.get("last_activated_at") else None,
             schema_version=data.get("schema_version", "1.0"),
         )
+
+
+@dataclass(frozen=True)
+class Decision:
+    """A decision influenced by activated experience seeds."""
+    id: str
+    context: str
+    chosen_seeds: tuple[str, ...]
+    excluded_seeds: tuple[str, ...]
+    action: str
+    created_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if not self.id or not self.action.strip():
+            raise ValueError("decision requires id and action")
+        _dt(self.created_at)
+
+    @classmethod
+    def new(cls, context: str, chosen_ids: list[str], excluded_ids: list[str], action: str,
+            now: datetime | None = None) -> "Decision":
+        return cls(
+            id=str(uuid4()), context=context,
+            chosen_seeds=tuple(chosen_ids), excluded_seeds=tuple(excluded_ids),
+            action=action, created_at=now or utc_now(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "context": self.context,
+            "chosen_seeds": list(self.chosen_seeds),
+            "excluded_seeds": list(self.excluded_seeds),
+            "action": self.action, "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True)
+class Observation:
+    """Outcome observed after executing a decision."""
+    decision_id: str
+    outcome: str
+    polarity: OutcomePolarity
+    source_id: str
+    observed_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if self.polarity not in ("success", "failure", "mixed"):
+            raise ValueError("polarity must be success, failure, or mixed")
+        if not self.source_id.strip() or not self.outcome.strip():
+            raise ValueError("observation requires source_id and outcome")
+
+    def to_evidence(self) -> "Evidence":
+        pol = "support" if self.polarity == "success" else "contradict"
+        return Evidence(pol, self.source_id, self.outcome, self.observed_at)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision_id": self.decision_id, "outcome": self.outcome,
+            "polarity": self.polarity, "source_id": self.source_id,
+            "observed_at": self.observed_at.isoformat(),
+        }

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from .models import Evidence, ExperienceSeed, Nature, utc_now
+from .models import Decision, Evidence, ExperienceSeed, Nature, Observation, utc_now
 
 
 class PolicyProtocol(Protocol):
@@ -235,6 +235,71 @@ class ExperienceEngine:
                 nature_weight=nature_weight,
             ))
         return sorted(results, key=lambda item: (-item.score, item.seed.id))[:limit]
+
+    def apply(
+        self, context: str, seeds: list[ExperienceSeed], chosen_ids: list[str], action: str,
+        now: datetime | None = None, limit: int = 5, backend: RetrievalBackend | None = None,
+    ) -> tuple[Decision, list[Activation]]:
+        """Record a decision influenced by activated experience.
+
+        Returns (Decision, activations) so the caller sees which seeds were surfaced
+        and which were chosen vs excluded.
+        """
+        timestamp = now or utc_now()
+        activations = self.activate(context, seeds, timestamp, limit, backend)
+        excluded_ids = [a.seed.id for a in activations if a.seed.id not in chosen_ids]
+        decision = Decision.new(context, chosen_ids, excluded_ids, action, timestamp)
+        # Mark seeds as activated
+        updated: list[ExperienceSeed] = []
+        for a in activations:
+            if a.seed.id in chosen_ids:
+                updated.append(a.seed.with_changes(last_activated_at=timestamp))
+        return decision, activations
+
+    def observe(
+        self, decision: Decision, observation: Observation,
+        seeds: list[ExperienceSeed], now: datetime | None = None,
+    ) -> list[ExperienceSeed]:
+        """Observe outcome and auto-reinforce related seeds.
+
+        Feedback rules:
+        - chosen + success → support
+        - chosen + failure → contradict
+        - chosen + mixed → support (weakly)
+        - excluded + success → contradict (seed was correctly ignored)
+        - excluded + failure → support (seed should have been heeded)
+        """
+        timestamp = now or observation.observed_at
+        seed_map = {s.id: s for s in seeds}
+        evolved: list[ExperienceSeed] = []
+
+        for seed_id in decision.chosen_seeds:
+            seed = seed_map.get(seed_id)
+            if seed is None:
+                continue
+            if observation.polarity == "success":
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                evolved.append(self.reinforce(seed, ev, timestamp))
+            elif observation.polarity == "failure":
+                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp)
+                evolved.append(self.reinforce(seed, ev, timestamp))
+            elif observation.polarity == "mixed":
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                evolved.append(self.reinforce(seed, ev, timestamp))
+
+        for seed_id in decision.excluded_seeds:
+            seed = seed_map.get(seed_id)
+            if seed is None:
+                continue
+            if observation.polarity == "success":
+                ev = Evidence("contradict", observation.source_id, observation.outcome, timestamp)
+                evolved.append(self.reinforce(seed, ev, timestamp))
+            elif observation.polarity == "failure":
+                ev = Evidence("support", observation.source_id, observation.outcome, timestamp)
+                evolved.append(self.reinforce(seed, ev, timestamp))
+            # mixed: no reinforcement for excluded seeds
+
+        return evolved
 
     def _should_activate(self, nature: Nature, supports: int) -> bool:
         if nature == "speculative":
