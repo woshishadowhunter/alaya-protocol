@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation, utc_now
+from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation, RuleType, utc_now
 
 
 class PolicyProtocol(Protocol):
@@ -325,6 +325,138 @@ class ExperienceEngine:
             # mixed: no reinforcement for excluded seeds
 
         return evolved
+
+    def check_rules(
+        self, context: str, seeds: list[ExperienceSeed],
+        backend: RetrievalBackend | None = None,
+    ) -> list[tuple[ExperienceSeed, float, str]]:
+        """Check context against hardened inference rules.
+
+        Returns list of (rule_seed, relevance, breach_status).
+        breach_status is 'triggered' (rule applies, no breach detected)
+        or 'warning' (rule applies, potential breach).
+        """
+        retriever = backend or LexicalRetrieval()
+        context_encoded = retriever.encode([context])[0]
+        context_tokens = _tokens(context)
+        results: list[tuple[ExperienceSeed, float, str]] = []
+        for seed in seeds:
+            if seed.rule_type is None or seed.status != "active":
+                continue
+            if not seed.trigger_tokens:
+                continue
+            trigger_hit = any(t in context_tokens for t in seed.trigger_tokens)
+            if not trigger_hit:
+                continue
+            rule_text = seed.lesson + " " + seed.guidance
+            rule_encoded = retriever.encode([rule_text])[0]
+            relevance = retriever.similarity(context_encoded, rule_encoded)
+            if relevance == 0:
+                continue
+            breach = "triggered"
+            if relevance > 0.6 and seed.nature == "principle":
+                breach = "warning"
+            results.append((seed, round(relevance, 4), breach))
+        return sorted(results, key=lambda r: (-r[1], r[0].id))
+
+    def audit_health(self, seeds: list[ExperienceSeed]) -> dict[str, object]:
+        """Cognitive health audit — 自证分 (svasamvitti-bhāga)."""
+        now = utc_now()
+        total = len(seeds)
+        if total == 0:
+            return {"total": 0, "status": "empty"}
+
+        natures: dict[str, int] = {"speculative": 0, "conditional": 0, "principle": 0}
+        statuses: dict[str, int] = {"candidate": 0, "active": 0, "deprecated": 0}
+        channels: dict[str, int] = {"direct": 0, "reflective": 0, "interactive": 0}
+        rule_types: dict[str, int] = {"correction": 0, "heuristic": 0, "boundary": 0, "pattern": 0}
+        confidences: list[float] = []
+        stale_count = 0
+
+        for s in seeds:
+            natures[s.nature] += 1
+            statuses[s.status] += 1
+            for c in s.distinct_channels:
+                channels[c] += 1
+            if s.rule_type:
+                rule_types[s.rule_type] += 1
+            confidences.append(s.confidence)
+            days_since_update = (now - s.updated_at).days
+            if days_since_update > 30 and s.status == "active":
+                stale_count += 1
+
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+        principle_ratio = natures["principle"] / total if total > 0 else 0
+        active_ratio = statuses["active"] / total if total > 0 else 0
+
+        health = "healthy"
+        if principle_ratio < 0.05 and total > 5:
+            health = "needs-principles"
+        if active_ratio < 0.1 and total > 3:
+            health = "stagnant"
+        if stale_count > total * 0.5:
+            health = "decaying"
+        if total < 3:
+            health = "bootstrapping"
+
+        return {
+            "total": total,
+            "health": health,
+            "natures": natures,
+            "statuses": statuses,
+            "channels": channels,
+            "rule_types": rule_types,
+            "avg_confidence": round(avg_confidence, 4),
+            "principle_ratio": round(principle_ratio, 4),
+            "active_ratio": round(active_ratio, 4),
+            "stale_active": stale_count,
+            "single_channel": sum(1 for s in seeds if len(s.distinct_channels) == 1),
+            "timestamp": now.isoformat(),
+        }
+
+    def audit_blindspots(
+        self, seeds: list[ExperienceSeed], known_domains: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Blindspot detection — 证自证分 (meta-awareness of gaps)."""
+        all_tags: set[str] = set()
+        tag_confidence: dict[str, float] = {}
+        for s in seeds:
+            for t in s.context_tags:
+                all_tags.add(t)
+                tag_confidence[t] = max(tag_confidence.get(t, 0.0), s.confidence)
+
+        active_tags = {s.context_tags for s in seeds if s.status == "active"}
+        flat_active: set[str] = set()
+        for tags in active_tags:
+            flat_active.update(tags)
+
+        low_confidence_tags = [t for t, c in tag_confidence.items() if c < 0.4]
+        single_source_tags: list[str] = []
+        for t in all_tags:
+            seeds_with_tag = [s for s in seeds if t in s.context_tags]
+            if len(seeds_with_tag) == 1 and seeds_with_tag[0].support_count < 2:
+                single_source_tags.append(t)
+
+        domain_coverage: dict[str, bool] = {}
+        if known_domains:
+            for domain in known_domains:
+                domain_tokens = _tokens(domain)
+                domain_coverage[domain] = any(
+                    domain_tokens & set(s.context_tags) for s in seeds
+                )
+
+        return {
+            "total_domains": len(all_tags),
+            "active_domains": len(flat_active),
+            "low_confidence_tags": low_confidence_tags,
+            "single_source_tags": single_source_tags,
+            "coverage": domain_coverage,
+            "recommendation": (
+                "explore: " + ", ".join(low_confidence_tags[:5])
+                if low_confidence_tags
+                else "sufficient coverage"
+            ),
+        }
 
     def _should_activate(self, nature: Nature, weighted_supports: float) -> bool:
         if nature == "speculative":

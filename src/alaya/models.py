@@ -10,6 +10,7 @@ Status = Literal["candidate", "active", "deprecated"]
 Nature = Literal["speculative", "conditional", "principle"]
 OutcomePolarity = Literal["success", "failure", "mixed"]
 Channel = Literal["direct", "reflective", "interactive"]
+RuleType = Literal["correction", "heuristic", "boundary", "pattern"]
 
 
 def utc_now() -> datetime:
@@ -72,6 +73,8 @@ class ExperienceSeed:
     created_at: datetime
     updated_at: datetime
     last_activated_at: datetime | None = None
+    rule_type: RuleType | None = None
+    trigger_tokens: tuple[str, ...] = ()
     schema_version: str = "1.0"
 
     def __post_init__(self) -> None:
@@ -117,13 +120,36 @@ class ExperienceSeed:
             confidence=confidence, status=status, nature=nature,
             evidence=(evidence,) if evidence else (),
             created_at=timestamp, updated_at=timestamp,
+            rule_type=None, trigger_tokens=(),
         )
 
     def with_changes(self, **changes: Any) -> "ExperienceSeed":
         return replace(self, **changes)
 
+    @classmethod
+    def new_rule(
+        cls, *, lesson: str, guidance: str, rule_type: RuleType,
+        trigger_tokens: list[str], applicability: str,
+        context_tags: list[str] | None = None,
+        confidence: float = 0.5, evidence: Evidence | None = None,
+        now: datetime | None = None,
+    ) -> "ExperienceSeed":
+        """Create a hardened inference rule seed."""
+        tags = context_tags or ["inference-rule"]
+        timestamp = now or utc_now()
+        return cls(
+            id=str(uuid4()), lesson=lesson, guidance=guidance,
+            context_tags=tuple(dict.fromkeys(t.strip().lower() for t in tags if t.strip())),
+            applicability=applicability,
+            counterexamples=(),
+            confidence=confidence, status="active", nature="conditional",
+            evidence=(evidence,) if evidence else (),
+            created_at=timestamp, updated_at=timestamp,
+            rule_type=rule_type, trigger_tokens=tuple(trigger_tokens),
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "schema_version": self.schema_version, "id": self.id, "lesson": self.lesson,
             "guidance": self.guidance, "context_tags": list(self.context_tags),
             "applicability": self.applicability, "counterexamples": list(self.counterexamples),
@@ -132,6 +158,10 @@ class ExperienceSeed:
             "created_at": self.created_at.isoformat(), "updated_at": self.updated_at.isoformat(),
             "last_activated_at": self.last_activated_at.isoformat() if self.last_activated_at else None,
         }
+        if self.rule_type:
+            d["rule_type"] = self.rule_type
+            d["trigger_tokens"] = list(self.trigger_tokens)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExperienceSeed":
@@ -146,6 +176,8 @@ class ExperienceSeed:
             created_at=_dt(data["created_at"]), updated_at=_dt(data["updated_at"]),
             last_activated_at=_dt(data["last_activated_at"]) if data.get("last_activated_at") else None,
             schema_version=data.get("schema_version", "1.0"),
+            rule_type=data.get("rule_type"),
+            trigger_tokens=tuple(data.get("trigger_tokens", ())),
         )
 
 
@@ -205,5 +237,40 @@ class Observation:
         return {
             "decision_id": self.decision_id, "outcome": self.outcome,
             "polarity": self.polarity, "source_id": self.source_id,
+            "observed_at": self.observed_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True)
+class ActivationLog:
+    """Record of an experience activation event. Supports the 四分 audit trail."""
+    id: str
+    agent_id: str
+    context: str
+    activated_seed_ids: tuple[str, ...]
+    chosen_seed_ids: tuple[str, ...]
+    excluded_seed_ids: tuple[str, ...]
+    observed_at: datetime = field(default_factory=utc_now)
+
+    @classmethod
+    def new(
+        cls, agent_id: str, context: str,
+        activated: list[str], chosen: list[str], excluded: list[str],
+        now: datetime | None = None,
+    ) -> "ActivationLog":
+        return cls(
+            id=str(uuid4()), agent_id=agent_id, context=context,
+            activated_seed_ids=tuple(activated),
+            chosen_seed_ids=tuple(chosen),
+            excluded_seed_ids=tuple(excluded),
+            observed_at=now or utc_now(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "agent_id": self.agent_id, "context": self.context,
+            "activated_seed_ids": list(self.activated_seed_ids),
+            "chosen_seed_ids": list(self.chosen_seed_ids),
+            "excluded_seed_ids": list(self.excluded_seed_ids),
             "observed_at": self.observed_at.isoformat(),
         }

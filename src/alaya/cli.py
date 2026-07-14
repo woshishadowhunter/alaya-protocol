@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .engine import EvolutionPolicy, ExperienceEngine
-from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation
+from .models import Channel, Decision, Evidence, ExperienceSeed, Nature, Observation, RuleType
 from .store import DecisionStore, SQLiteSeedStore
 
 
@@ -47,6 +47,26 @@ def parser() -> argparse.ArgumentParser:
     observe_cmd.add_argument("--outcome", required=True)
     observe_cmd.add_argument("--polarity", choices=["success", "failure", "mixed"], required=True)
     observe_cmd.add_argument("--source", required=True)
+
+    rule_cmd = commands.add_parser("rule", help="Harden or check inference rules")
+    rule_sub = rule_cmd.add_subparsers(dest="rule_command", required=True)
+    rule_harden = rule_sub.add_parser("harden", help="Create a hardened inference rule")
+    rule_harden.add_argument("--lesson", required=True)
+    rule_harden.add_argument("--guidance", required=True)
+    rule_harden.add_argument("--type", choices=["correction", "heuristic", "boundary", "pattern"], required=True)
+    rule_harden.add_argument("--triggers", required=True, help="Comma-separated trigger tokens")
+    rule_harden.add_argument("--applies", required=True)
+    rule_harden.add_argument("--source")
+    rule_harden.add_argument("--evidence")
+    rule_harden.add_argument("--channel", choices=["direct", "reflective", "interactive"], default="reflective")
+    rule_check = rule_sub.add_parser("check", help="Check context against rules")
+    rule_check.add_argument("context")
+
+    audit_cmd = commands.add_parser("audit", help="Run cognitive self-audit")
+    audit_sub = audit_cmd.add_subparsers(dest="audit_command", required=True)
+    audit_sub.add_parser("health", help="Cognitive health check")
+    audit_blind = audit_sub.add_parser("blindspots", help="Detect uncovered domains")
+    audit_blind.add_argument("--domains", help="Comma-separated known domains to check coverage")
 
     commands.add_parser("list", help="List seeds")
     show = commands.add_parser("show", help="Show one seed"); show.add_argument("seed_id")
@@ -112,6 +132,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         for seed in evolved:
             store.save(seed)
         _print([seed.to_dict() for seed in evolved]); return 0
+    if args.command == "rule":
+        if args.rule_command == "harden":
+            evidence = None
+            if args.source and args.evidence:
+                evidence = Evidence("support", args.source, args.evidence, now, channel=args.channel)
+            seed = ExperienceSeed.new_rule(
+                lesson=args.lesson, guidance=args.guidance,
+                rule_type=args.type,
+                trigger_tokens=[t.strip() for t in args.triggers.split(",")],
+                applicability=args.applies, evidence=evidence, now=now,
+            )
+            store.save(seed); _print(seed.to_dict()); return 0
+        if args.rule_command == "check":
+            seeds = store.list_active()
+            rules = [s for s in seeds if s.rule_type is not None]
+            results = engine.check_rules(args.context, rules)
+            _print([{"rule": r[0].to_dict(), "relevance": r[1], "breach": r[2]} for r in results])
+            return 0
+    if args.command == "audit":
+        if args.audit_command == "health":
+            seeds = store.list()
+            result = engine.audit_health(seeds)
+            _print(result); return 0
+        if args.audit_command == "blindspots":
+            seeds = store.list()
+            domains = args.domains.split(",") if getattr(args, "domains", None) else None
+            result = engine.audit_blindspots(seeds, domains)
+            _print(result); return 0
     if args.command == "delete":
         if not store.delete(args.seed_id):
             raise SystemExit(f"seed not found: {args.seed_id}")
