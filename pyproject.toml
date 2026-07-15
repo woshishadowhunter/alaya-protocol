@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [{name = "Alaya Protocol Contributors"}]
-keywords = ["ai-agents", "memory", "experience", "agent-infrastructure"]
+keywords = ["ai-agents", "memory", "experience", "agent-infrastructure", "auditable-memory", "local-first", "agent-governance"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: Apache Software License",
@@ -25,4 +25,3 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 alaya = ["py.typed"]
-

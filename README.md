@@ -1,5 +1,7 @@
 # Alaya Protocol
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Give agents experience, not just memory.**
 
 Alaya is a small, framework-neutral Python layer that turns repeated outcomes into auditable and revisable experience seeds. An agent can retrieve relevant lessons before a decision, but a single LLM reflection never becomes behavioral truth by itself.
@@ -11,8 +13,8 @@ Alaya is a small, framework-neutral Python layer that turns repeated outcomes in
 Most agent memory answers *what happened*. Alaya captures a narrower object:
 
 ```text
-situation → action → observed outcome → candidate lesson
-          → independent evidence → bounded behavioral guidance
+situation -> action -> observed outcome -> candidate lesson
+          -> independent evidence -> bounded behavioral guidance
 ```
 
 Facts belong in knowledge stores, preferences in consented user profiles, and explicit rules in project instructions. Alaya is for contextual practical judgment.
@@ -88,14 +90,13 @@ Storage is local by default and no network calls are made. Do not store raw priv
 
 ## Roadmap
 
-1. v0.1 — individual experience lifecycle and Skill
-2. v0.2 — pluggable semantic retrieval and framework adapters
-3. v0.3 — relationship experience between agents with scoped trust evidence
-4. v0.4 — multi-agent negotiation and longitudinal evaluation
+1. v0.1 - individual experience lifecycle and Skill
+2. v0.2 - pluggable semantic retrieval and framework adapters
+3. v0.3 - relationship experience between agents with scoped trust evidence
+4. v0.4 - multi-agent negotiation and longitudinal evaluation
 
-See [architecture](docs/architecture.md), [contributing](CONTRIBUTING.md), and the [application readiness plan](docs/codex-for-oss-application.md).
+See [architecture](docs/architecture.md), [use cases](docs/use-cases.md), [contributing](CONTRIBUTING.md), and the [application readiness plan](docs/codex-for-oss-application.md).
 
 ## License
 
 Apache License 2.0.
-
