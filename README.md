@@ -83,6 +83,7 @@ matches = engine.activate("A stakeholder-heavy project", [seed])
 - Explainable retrieval rather than hidden profile changes
 - `learn-from-experience` Skill for ChatGPT/Codex-compatible environments
 - A community project decision demo and deterministic evaluation
+- A framework adapter pattern and conformance benchmark for integrations
 
 ## Privacy and safety
 
@@ -95,7 +96,7 @@ Storage is local by default and no network calls are made. Do not store raw priv
 3. v0.3 - relationship experience between agents with scoped trust evidence
 4. v0.4 - multi-agent negotiation and longitudinal evaluation
 
-See [architecture](docs/architecture.md), [use cases](docs/use-cases.md), [contributing](CONTRIBUTING.md), and the [application readiness plan](docs/codex-for-oss-application.md).
+See [architecture](docs/architecture.md), [use cases](docs/use-cases.md), [comparison and benchmark notes](docs/comparison-and-benchmark.md), [contributing](CONTRIBUTING.md), and the [application readiness plan](docs/codex-for-oss-application.md).
 
 ## License
 
