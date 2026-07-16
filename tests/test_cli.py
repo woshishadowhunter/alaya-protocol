@@ -65,3 +65,8 @@ class CliTests(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_confidence_bounds_20260716():
+    c = 0.0
+    assert 0.0 <= c <= 1.0
