@@ -4,7 +4,12 @@
 
 **给长期运行的 AI Agent 增加“可审计经验”，而不只是记忆。**
 
-Alaya Protocol 是一个轻量、框架中立的 Python 协议层。它把重复出现的结果、反例和证据沉淀为可检查、可修订、可删除的 experience seeds。Agent 可以在做决策前检索相关经验，但单次 LLM 反思不会直接变成不可质疑的行为规则。
+Alaya Protocol 是一个零运行时依赖、框架中立的 Python 协议层。它把观察到的结果、反例和证据沉淀为可检查、可修订、可删除的 experience seeds。Agent 可以在做决策前检索相关经验，但单次 LLM 反思不会直接变成不可质疑的行为规则。
+
+[![CI](https://github.com/woshishadowhunter/alaya-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/woshishadowhunter/alaya-protocol/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/woshishadowhunter/alaya-protocol)](https://github.com/woshishadowhunter/alaya-protocol/releases/latest)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](pyproject.toml)
+[![License: Apache--2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
 
 > Alaya 的 seed / activation 词汇受到唯识学启发，但本项目是工程模型，不声称软件具有意识，也不声称复现了佛教哲学。
 
@@ -35,7 +40,7 @@ situation -> action -> observed outcome -> candidate lesson
 ## 快速安装
 
 ```bash
-python -m pip install -e .
+python -m pip install https://github.com/woshishadowhunter/alaya-protocol/releases/download/v0.3.1/alaya_protocol-0.3.1-py3-none-any.whl
 alaya --help
 ```
 
@@ -69,6 +74,8 @@ alaya activate "planning a community project with multiple property owners"
 ```
 
 输出会包含相关度、置信度、时效、匹配词、证据、适用边界和反例。
+
+需要接入 LangGraph、OpenAI Agents SDK、CrewAI、AutoGen 或自定义运行器时，请参考[框架集成指南](docs/integrations.md)。指南明确了决策前激活、决策留痕、结果反馈三个边界，以及独立评价和隐私约束。
 
 ## Python API
 
