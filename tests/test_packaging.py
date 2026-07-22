@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import tomllib
 import unittest
+from importlib.metadata import metadata
 from pathlib import Path
 
 import alaya
@@ -12,15 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PackagingContractTests(unittest.TestCase):
     def test_package_metadata_matches_runtime(self) -> None:
-        metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        package_metadata = metadata("alaya-protocol")
+        project_urls = dict(
+            entry.split(", ", 1) for entry in package_metadata.get_all("Project-URL", [])
+        )
 
-        self.assertEqual(metadata["version"], "0.3.1")
-        self.assertEqual(metadata["version"], alaya.__version__)
-        self.assertEqual(metadata["license"], "Apache-2.0")
-        self.assertEqual(metadata["license-files"], ["LICENSE"])
-        self.assertNotIn("License :: OSI Approved :: Apache Software License", metadata["classifiers"])
+        self.assertEqual(package_metadata["Version"], "0.3.1")
+        self.assertEqual(package_metadata["Version"], alaya.__version__)
+        self.assertEqual(package_metadata["License-Expression"], "Apache-2.0")
+        self.assertEqual(package_metadata.get_all("License-File"), ["LICENSE"])
+        self.assertNotIn(
+            "License :: OSI Approved :: Apache Software License",
+            package_metadata.get_all("Classifier", []),
+        )
         self.assertEqual(
-            metadata["urls"]["Repository"],
+            project_urls["Repository"],
             "https://github.com/woshishadowhunter/alaya-protocol",
         )
 
